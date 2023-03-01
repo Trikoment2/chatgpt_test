@@ -3,6 +3,24 @@ const { Configuration, OpenAIApi } = require("openai");
 const { getImage, getChat } = require("./Helper/functions");
 const { Telegraf } = require("telegraf");
 
+const { MongoClient } = require("mongodb");
+
+const mongoClient = new MongoClient(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
+let db;
+
+mongoClient.connect((err, client) => {
+  if (err) {
+    console.log(err);
+    return;
+  }
+  db = client.db();
+  console.log("Connected to MongoDB");
+});
+
 const configuration = new Configuration({
   apiKey: process.env.API,
 });
@@ -10,11 +28,39 @@ const openai = new OpenAIApi(configuration);
 module.exports = openai;
 
 const bot = new Telegraf(process.env.TG_API);
+
+bot.use((ctx, next) => {
+  if (db && ctx.chat && ctx.chat.id) {
+    const collection = db.collection("users");
+    collection.findOne({ chatId: ctx.chat.id }, (err, result) => {
+      if (err) {
+        console.log(err);
+        return next();
+      }
+      if (result) {
+        ctx.dbuser = result;
+        return next();
+      }
+      collection.insertOne({ chatId: ctx.chat.id }, (err, result) => {
+        if (err) {
+          console.log(err);
+          return next();
+        }
+        ctx.dbuser = result.ops[0];
+        console.log("User added to MongoDB");
+        next();
+      });
+    });
+  } else {
+    next();
+  }
+});
+
 bot.start((ctx) => ctx.reply("Welcome , You can ask anything from me"));
 
 bot.help((ctx) => {
   ctx.reply(
-    "This bot can perform the following command \n /image -> to create image from text \n /ask -> ank anything from me "
+    "This bot can perform the following command \n /image -> to create image from text \n /ask -> ask anything from me "
   );
 });
 
